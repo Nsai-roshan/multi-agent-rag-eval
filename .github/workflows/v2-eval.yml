@@ -1,0 +1,64 @@
+name: v2-eval-gate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  v2-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Confirm v1 files are untouched
+        shell: bash
+        run: |
+          V1_BASE_COMMIT="$(git rev-list --all --grep='final eval test missed before' -n 1)"
+          if [ -z "$V1_BASE_COMMIT" ]; then
+            echo "Unable to identify the v1 base commit" >&2
+            exit 1
+          fi
+          git cat-file -e "$V1_BASE_COMMIT^{commit}"
+          git diff "$V1_BASE_COMMIT" --exit-code -- \
+            Code/query_phi.py Code/BM25_corpus.py Code/natmedcorpus.py \
+            Code/create_kg.py Code/KG_relationship_generation.py
+
+      - name: Run v2 CI subset
+        env:
+          LLM_PROVIDER: groq
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          EVAL_DELAY_SECONDS: "1"
+        run: |
+          python Code/v2/eval/run.py --mode v2 --ci-subset --delay 1
+          REPORT_PATH="$(find Code/v2/eval/reports -mindepth 2 -maxdepth 2 -name report.json -type f -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)"
+          test -n "$REPORT_PATH"
+          python - "$REPORT_PATH" <<'PY'
+          import json, pathlib, sys
+          report = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          baseline = json.loads(pathlib.Path("Code/v2/eval/baseline-ci.json").read_text())
+          old = baseline["summary"]
+          new = report["summary"]
+          h_delta = (new["hallucination_rate"] - old["hallucination_rate"]) * 100
+          p_delta = (old["citation_precision"] - new["citation_precision"]) * 100
+          if h_delta > 2.0:
+              raise SystemExit(f"hallucination rate regressed by {h_delta:.2f} points")
+          if p_delta > 2.0:
+              raise SystemExit(f"citation precision dropped by {p_delta:.2f} points")
+          print(f"CI gate passed: hallucination delta={h_delta:.2f} points, citation precision delta={p_delta:.2f} points")
+          PY

@@ -7,26 +7,55 @@ import hashlib
 import json
 import os
 import statistics
+import re
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
-
-import yaml
-
-from ..baseline import baseline_answer
-from ..pipeline import _result_from_state
-from ..graph import Pipeline
-from .judge import judge_answer
 
 ROOT = Path(__file__).resolve().parents[3]
 GOLDEN_PATH = ROOT / "Code" / "v2" / "eval" / "golden.jsonl"
 EVAL_CONFIG = ROOT / "Code" / "v2" / "config" / "eval.yaml"
 SCHEMA_PATH = Path(__file__).resolve().parent / "report_schema.json"
 
+import yaml
+
+try:
+    from ..baseline import baseline_answer
+    from ..pipeline import _result_from_state
+    from ..graph import Pipeline
+    from .judge import judge_answer
+except ImportError:
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from Code.v2.baseline import baseline_answer
+    from Code.v2.pipeline import _result_from_state
+    from Code.v2.graph import Pipeline
+    from Code.v2.eval.judge import judge_answer
+
 
 def load_golden(path: str | Path = GOLDEN_PATH) -> list[dict[str, Any]]:
     return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _bump_dataset_version(version: str) -> str:
+    match = re.match(r"^(\d+)\.(\d+)(.*)$", str(version))
+    if not match:
+        return f"{version}.1"
+    return f"{match.group(1)}.{int(match.group(2)) + 1}{match.group(3)}"
+
+
+def refresh_hash(golden_path: str | Path = GOLDEN_PATH, config_path: str | Path = EVAL_CONFIG) -> tuple[str, str]:
+    """Refresh the frozen dataset digest and bump its version exactly once."""
+    config_path = Path(config_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    digest = hashlib.sha256(Path(golden_path).read_bytes()).hexdigest()
+    version = _bump_dataset_version(config.get("dataset_version", "0.0"))
+    config["dataset_version"] = version
+    config["golden_sha256"] = digest
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    return digest, version
 
 
 def validate_golden_hash(path: str | Path = GOLDEN_PATH, *, expected_hash: str | None = None, dataset_version: str | None = None) -> str:
@@ -73,9 +102,12 @@ def _answer_v1(item: dict[str, Any]) -> tuple[str, list[str], list[dict[str, Any
 def _answer_v2(item: dict[str, Any], pipeline: Pipeline | None = None) -> tuple[str, list[str], list[dict[str, Any]], float, float, str | None, bool]:
     start = time.perf_counter()
     active = pipeline or Pipeline()
-    state = active.run(item["question"])
-    result = _result_from_state(state)
-    return result.answer, result.citations, list(state.get("chunks", [])), result.cost_usd, state.get("latency_ms", (time.perf_counter() - start) * 1000), state.get("tier"), result.abstained
+    try:
+        state = active.run(item["question"])
+        result = _result_from_state(state)
+        return result.answer, result.citations, list(state.get("chunks", [])), result.cost_usd, state.get("latency_ms", (time.perf_counter() - start) * 1000), state.get("tier"), result.abstained
+    except Exception:
+        return "I could not fully verify this answer from the available evidence.", [], [], 0.0, (time.perf_counter() - start) * 1000, None, True
 
 
 def _metrics(rows: list[dict[str, Any]], mode: str) -> dict[str, Any]:
@@ -119,11 +151,19 @@ def validate_report(path: str | Path) -> bool:
     return True
 
 
-def run_evaluation(mode: str, *, limit: int | None = None, delay: float | None = None, golden_path: str | Path = GOLDEN_PATH, pipeline: Pipeline | None = None, answer_v1: Callable = _answer_v1, answer_v2: Callable = _answer_v2, judge: Callable = judge_answer) -> tuple[dict[str, Any], Path]:
+def run_evaluation(mode: str, *, limit: int | None = None, delay: float | None = None, golden_path: str | Path = GOLDEN_PATH, pipeline: Pipeline | None = None, answer_v1: Callable = _answer_v1, answer_v2: Callable = _answer_v2, judge: Callable = judge_answer, subset_ids: list[str] | None = None) -> tuple[dict[str, Any], Path]:
     if mode not in {"v1", "v2"}: raise ValueError("mode must be v1 or v2")
     validate_golden_hash(golden_path)
     config = yaml.safe_load(EVAL_CONFIG.read_text(encoding="utf-8")) or {}
-    items = load_golden(golden_path)[:limit]
+    items = load_golden(golden_path)
+    if subset_ids is not None:
+        by_id = {item["id"]: item for item in items}
+        missing = [item_id for item_id in subset_ids if item_id not in by_id]
+        if missing:
+            raise ValueError(f"CI subset IDs missing from golden set: {missing}")
+        items = [by_id[item_id] for item_id in subset_ids]
+    if limit is not None:
+        items = items[:limit]
     rows = []
     active_pipeline = pipeline or (Pipeline() if mode == "v2" and answer_v2 is _answer_v2 else None)
     pause = float(os.getenv("EVAL_DELAY_SECONDS", "0.0")) if delay is None else delay
@@ -149,11 +189,20 @@ def run_evaluation(mode: str, *, limit: int | None = None, delay: float | None =
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["v1", "v2"], required=True)
+    parser.add_argument("--mode", choices=["v1", "v2"])
     parser.add_argument("--limit", type=int)
     parser.add_argument("--delay", type=float, default=None)
+    parser.add_argument("--ci-subset", action="store_true")
+    parser.add_argument("--update-hash", action="store_true")
     args = parser.parse_args()
-    report, path = run_evaluation(args.mode, limit=args.limit, delay=args.delay)
+    if args.update_hash:
+        digest, version = refresh_hash()
+        print(json.dumps({"dataset_version": version, "golden_sha256": digest}, indent=2))
+        return 0
+    if not args.mode:
+        parser.error("--mode is required unless --update-hash is used")
+    config = yaml.safe_load(EVAL_CONFIG.read_text(encoding="utf-8")) or {}
+    report, path = run_evaluation(args.mode, limit=args.limit, delay=args.delay, subset_ids=config.get("ci_subset_ids") if args.ci_subset else None)
     print(json.dumps({"report": str(path), "summary": report["summary"]}, indent=2))
     return 0
 

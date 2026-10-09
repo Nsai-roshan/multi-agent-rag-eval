@@ -1,7 +1,28 @@
 golden_path: Code/v2/eval/golden.jsonl
-dataset_version: "0.1-unverified"
-golden_sha256: "b44c4a1547875cce647d5568f42114ac66d15544b5fc04844abd7bf487962de6"
+dataset_version: 0.2-unverified
+golden_sha256: b44c4a1547875cce647d5568f42114ac66d15544b5fc04844abd7bf487962de6
 ci_subset: 20
+ci_subset_ids:
+- v1-01
+- v1-05
+- v1-07
+- v1-17
+- v1-18
+- v1-20
+- v1-22
+- v1-23
+- v1-49
+- v1-50
+- v1-02
+- v1-03
+- v1-06
+- v1-10
+- v1-13
+- v1-15
+- v1-26
+- v1-30
+- v1-35
+- v1-36
 regression_thresholds:
   hallucination_rate_points: 2.0
   citation_precision_points: 2.0

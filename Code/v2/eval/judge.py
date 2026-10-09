@@ -21,6 +21,14 @@ def judge_answer(
     verdicts. Both v1 and v2 answers enter this same path.
     """
     active_ledger = ledger or CostLedger()
+    if not chunks:
+        return {
+            "claims": [],
+            "verdicts": [],
+            "passed": True,
+            "cost_usd": active_ledger.usd_total,
+            "ledger": active_ledger.calls,
+        }
     active_verifier = verifier or Verifier(ledger=active_ledger)
     report = active_verifier.verify({"answer": answer_text, "claims": []}, chunks)
     return {

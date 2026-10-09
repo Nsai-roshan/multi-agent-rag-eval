@@ -7,11 +7,10 @@ or the claim is contradicted. When uncertain, choose PARTIAL or UNSUPPORTED;
 never upgrade uncertainty to SUPPORTED.
 
 Return only JSON in this exact shape:
-[{{"claim_id":"c1","verdict":"SUPPORTED|UNSUPPORTED|PARTIAL","evidence_chunk_ids":["allowed-id"]}}]
+{{"verdicts":[{{"claim_id":"c1","verdict":"SUPPORTED|UNSUPPORTED|PARTIAL","evidence_chunk_ids":["allowed-id"]}}]}}
 
 Claims:
 {claims}
 
 Cited chunks:
 {chunks}
-

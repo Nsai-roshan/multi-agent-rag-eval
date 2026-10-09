@@ -1,6 +1,6 @@
 golden_path: Code/v2/eval/golden.jsonl
-dataset_version: 0.3-unverified
-golden_sha256: 5a3005ad7dc0aa61fe603101634b480fd39dfb9295e0c74aeac45c6fc1e3deb0
+dataset_version: 0.4-unverified
+golden_sha256: b3b173e07f5aad0f40fbf9d041917061299829c54c2642cf2f9c4a852095a21a
 ci_subset: 20
 ci_subset_ids:
 - v1-01

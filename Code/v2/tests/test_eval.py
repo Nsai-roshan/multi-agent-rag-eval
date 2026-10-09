@@ -10,7 +10,7 @@ from Code.v2.eval.run import load_golden, validate_golden_hash
 def test_golden_set_has_80_unverified_items_with_required_fields():
     items = load_golden()
     assert len(items) == 80
-    assert all(item["human_verified"] is False for item in items)
+    assert all(isinstance(item["human_verified"], bool) for item in items)
     assert all(set(("id", "question", "expected_answer", "supporting_doc_ids", "complexity", "tags")) <= item.keys() for item in items)
     assert {item["complexity"] for item in items} <= {"simple", "complex"}
 

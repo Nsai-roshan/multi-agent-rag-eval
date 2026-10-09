@@ -52,7 +52,7 @@ def _make_client(config: dict[str, Any], provider: str):
     provider_config = _provider_config(config, provider)
     base_url = _resolve_env(provider_config["base_url"]).rstrip("/")
     api_key = os.getenv(provider_config.get("api_key_env") or "") or "ollama"
-    return OpenAI(api_key=api_key, base_url=base_url)
+    return OpenAI(api_key=api_key, base_url=base_url, timeout=120.0)
 
 
 @dataclass(frozen=True)
@@ -107,6 +107,7 @@ class Router:
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             response_format={"type": "json_object"},
+            timeout=120,
         )
         payload = json.loads(response.choices[0].message.content)
         if self.ledger is not None:

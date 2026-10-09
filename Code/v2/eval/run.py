@@ -46,13 +46,21 @@ def _is_429(error: Exception) -> bool:
     return getattr(error, "status_code", None) == 429 or getattr(response, "status_code", None) == 429 or "429" in str(error)
 
 
-def _with_backoff(fn: Callable[[], Any], *, retries: int = 4, base_seconds: float = 1.0) -> Any:
+MAX_429_RETRIES = 5
+
+
+def _with_backoff(fn: Callable[[], Any], *, retries: int = MAX_429_RETRIES, base_seconds: float = 1.0) -> Any:
+    retries = min(max(0, retries), MAX_429_RETRIES)
     for attempt in range(retries + 1):
         try:
             return fn()
         except Exception as error:
-            if not _is_429(error) or attempt >= retries:
+            if not _is_429(error):
                 raise
+            if attempt >= retries:
+                raise RuntimeError(
+                    f"API request failed after {retries} retries due to HTTP 429 rate limiting"
+                ) from error
             time.sleep(base_seconds * (2**attempt))
 
 

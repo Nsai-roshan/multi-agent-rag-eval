@@ -99,6 +99,7 @@ class Verifier:
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             response_format={"type": "json_object"},
+            timeout=120,
         )
         return response.choices[0].message.content
 
@@ -174,4 +175,3 @@ class Verifier:
 
 def verify(draft: Any, chunks: Any, **kwargs: Any) -> VerifyReport:
     return Verifier(**kwargs).verify(draft, chunks)
-
